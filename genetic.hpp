@@ -1,37 +1,35 @@
 #ifndef GENETICO_HPP
 #define GENETICO_HPP
 
-#include <vector>
-#include <numeric>
 #include <algorithm>
-#include <random>
 #include <cmath>
+#include <numeric>
+#include <random>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 #include "city.hpp"
 
-struct Individuo
-{
+struct Individuo {
     std::vector<int> genoma;
-    double distanciaTotal;
-    double fitness;
+    double distanciaTotal = 0.0;
+    double fitness = 0.0;
 
-    void calcularFitness(const std::vector<std::vector<double>>& matrizDistancias)
-    {
+    void calcularFitness(const std::vector<std::vector<double>>& matrizDistancias) {
         distanciaTotal = 0.0;
-        size_t n = genoma.size();
+        const size_t n = genoma.size();
 
-        for (size_t i=0;i<n;++i)
-        {
-            int de=genoma[i];
-            int para=genoma[(i+1)%n];
-            distanciaTotal+=matrizDistancias[de][para];
+        for (size_t i = 0; i < n; ++i) {
+            const int de = genoma[i];
+            const int para = genoma[(i + 1) % n];
+            distanciaTotal += matrizDistancias[de][para];
         }
 
-        fitness=(distanciaTotal>0.0) ? (1.0/distanciaTotal) : 0.0;
+        fitness = distanciaTotal > 0.0 ? 1.0 / distanciaTotal : 0.0;
     }
 };
 
-struct ParametrosAG
-{
+struct ParametrosAG {
     size_t tamanhoPopulacao = 100;
     size_t numGeracoes = 500;
     double taxaCrossover = 0.85;
@@ -40,114 +38,141 @@ struct ParametrosAG
     bool usarElitismo = true;
 };
 
-class AlgoritmoGenetico
-{
-    private:
+class AlgoritmoGenetico {
+private:
     ParametrosAG params;
     std::vector<std::vector<double>> matrizDistancias;
     size_t numCidades;
     std::mt19937 rng;
 
-    public:
-    AlgoritmoGenetico(const std::vector<Ponto>& cidades, ParametrosAG parametros, unsigned int seed = 42)
-    : params(parametros), rng(seed) 
-    {   
-        numCidades=cidades.size();
-        matrizDistancias=GeradorCenarios::calcularMatrizDistancias(cidades);
+public:
+    AlgoritmoGenetico(const std::vector<Ponto>& cidades,
+                     ParametrosAG parametros,
+                     unsigned int seed = 42)
+        : params(parametros), numCidades(cidades.size()), rng(seed) {
+        matrizDistancias = GeradorCenarios::calcularMatrizDistancias(cidades);
     }
 
-    std::vector<Individuo> gerarPopulacaoInicial()
-    {
+    std::vector<Individuo> gerarPopulacaoInicial() {
         std::vector<Individuo> populacao(params.tamanhoPopulacao);
         std::vector<int> rotaBase(numCidades);
-        std::iota(rotaBase.begin(),rotaBase.end(),0);
+        std::iota(rotaBase.begin(), rotaBase.end(), 0);
 
-        for(auto& ind : populacao)
-        {
+        for (auto& ind : populacao) {
             ind.genoma = rotaBase;
-            std::shuffle(ind.genoma.begin(), ind.genoma.end(),rng);
+            std::shuffle(ind.genoma.begin(), ind.genoma.end(), rng);
             ind.calcularFitness(matrizDistancias);
         }
+
         return populacao;
     }
 
-    Individuo selecaoTorneio(const std::vector<Individuo>& populacao)
-    {
-        std::uniform_int_distribution<size_t> dist(0,populacao.size()-1);
+    Individuo selecaoTorneio(const std::vector<Individuo>& populacao) {
+        if (populacao.empty()) {
+            throw std::invalid_argument("A populacao nao pode estar vazia.");
+        }
+
+        std::uniform_int_distribution<size_t> dist(0, populacao.size() - 1);
         Individuo melhor = populacao[dist(rng)];
 
-        for(size_t i=1; i<params.tamanhoTorneio;i++)
-        {
-            Individuo desafiante=populacao[dist(rng)];
-            if (desafiante.fitness>melhor.fitness)
-            {
-                melhor=desafiante;
+        for (size_t i = 1; i < params.tamanhoTorneio; ++i) {
+            const Individuo& desafiante = populacao[dist(rng)];
+            if (desafiante.fitness > melhor.fitness) {
+                melhor = desafiante;
             }
         }
+
         return melhor;
     }
 
-    std::vector<Individuo> evoluirGeracao(const std::vector<Individuo>& populacao)
-    {
-        if (populacao.empty()) return {};
+    Individuo crossoverOX(const Individuo& pai1, const Individuo& pai2) {
+        if (numCidades < 2) {
+            return pai1;
+        }
+
+        std::uniform_real_distribution<double> distProb(0.0, 1.0);
+        if (distProb(rng) >= params.taxaCrossover) {
+            return pai1;
+        }
+
+        Individuo filho;
+        filho.genoma.assign(numCidades, -1);
+
+        std::uniform_int_distribution<size_t> distIdx(0, numCidades - 1);
+        size_t idx1 = distIdx(rng);
+        size_t idx2 = distIdx(rng);
+        if (idx1 > idx2) {
+            std::swap(idx1, idx2);
+        }
+
+        std::vector<bool> presente(numCidades, false);
+        for (size_t i = idx1; i <= idx2; ++i) {
+            filho.genoma[i] = pai1.genoma[i];
+            presente[pai1.genoma[i]] = true;
+        }
+
+        size_t posAtualFilho = (idx2 + 1) % numCidades;
+        for (size_t i = 0; i < numCidades; ++i) {
+            const size_t posPai2 = (idx2 + 1 + i) % numCidades;
+            const int cidadePai2 = pai2.genoma[posPai2];
+
+            if (!presente[cidadePai2]) {
+                filho.genoma[posAtualFilho] = cidadePai2;
+                posAtualFilho = (posAtualFilho + 1) % numCidades;
+            }
+        }
+
+        filho.calcularFitness(matrizDistancias);
+        return filho;
+    }
+
+    void mutacaoInversao(Individuo& ind) {
+        if (numCidades < 2) {
+            return;
+        }
+
+        std::uniform_real_distribution<double> distProb(0.0, 1.0);
+        if (distProb(rng) < params.taxaMutacao) {
+            std::uniform_int_distribution<size_t> distIdx(0, numCidades - 1);
+            size_t idx1 = distIdx(rng);
+            size_t idx2 = distIdx(rng);
+            if (idx1 > idx2) {
+                std::swap(idx1, idx2);
+            }
+
+            std::reverse(ind.genoma.begin() + idx1,
+                         ind.genoma.begin() + idx2 + 1);
+            ind.calcularFitness(matrizDistancias);
+        }
+    }
+
+    std::vector<Individuo> evoluirGeracao(const std::vector<Individuo>& populacaoAtual) {
+        if (populacaoAtual.empty() || params.tamanhoPopulacao == 0) {
+            return {};
+        }
 
         std::vector<Individuo> novaPopulacao;
         novaPopulacao.reserve(params.tamanhoPopulacao);
-        std::uniform_real_distribution<double> probabilidade(0.0, 1.0);
 
-        if (params.usarElitismo && params.tamanhoPopulacao > 0)
-        {
-            novaPopulacao.push_back(*std::max_element(populacao.begin(), populacao.end(),
-                [](const Individuo& a, const Individuo& b) { return a.fitness < b.fitness; }));
+        if (params.usarElitismo) {
+            const auto melhorIt = std::max_element(
+                populacaoAtual.begin(), populacaoAtual.end(),
+                [](const Individuo& a, const Individuo& b) {
+                    return a.fitness < b.fitness;
+                });
+            novaPopulacao.push_back(*melhorIt);
         }
 
-        while (novaPopulacao.size() < params.tamanhoPopulacao)
-        {
-            Individuo filho = selecaoTorneio(populacao);
-            if (numCidades > 1)
-            {
-                std::uniform_int_distribution<size_t> indice(0, numCidades - 1);
-                if (probabilidade(rng) < params.taxaCrossover)
-                {
-                    const Individuo outroPai = selecaoTorneio(populacao);
-                    size_t inicio = indice(rng);
-                    size_t fim = indice(rng);
-                    if (inicio > fim) std::swap(inicio, fim);
-
-                    // Order crossover: preserva um trecho e completa sem repetir cidades.
-                    std::vector<int> rota(numCidades, -1);
-                    std::vector<bool> usadas(numCidades, false);
-                    for (size_t i = inicio; i <= fim; ++i)
-                    {
-                        rota[i] = filho.genoma[i];
-                        usadas[rota[i]] = true;
-                    }
-                    size_t destino = (fim + 1) % numCidades;
-                    for (size_t i = 0; i < numCidades; ++i)
-                    {
-                        int cidade = outroPai.genoma[(fim + 1 + i) % numCidades];
-                        if (!usadas[cidade])
-                        {
-                            rota[destino] = cidade;
-                            destino = (destino + 1) % numCidades;
-                        }
-                    }
-                    filho.genoma = std::move(rota);
-                }
-                if (probabilidade(rng) < params.taxaMutacao)
-                {
-                    size_t a = indice(rng);
-                    size_t b = indice(rng);
-                    std::swap(filho.genoma[a], filho.genoma[b]);
-                }
-            }
-            filho.calcularFitness(matrizDistancias);
+        while (novaPopulacao.size() < params.tamanhoPopulacao) {
+            Individuo pai1 = selecaoTorneio(populacaoAtual);
+            Individuo pai2 = selecaoTorneio(populacaoAtual);
+            Individuo filho = crossoverOX(pai1, pai2);
+            mutacaoInversao(filho);
             novaPopulacao.push_back(std::move(filho));
         }
+
         return novaPopulacao;
     }
-
 };
 
 #endif
-

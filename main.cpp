@@ -7,7 +7,6 @@
 #include <vector>
 #include <chrono>
 
-
 namespace UI {
 const Color fundo = {12, 18, 30, 255};
 const Color superficie = {20, 29, 45, 255};
@@ -59,7 +58,6 @@ void grafico(const std::vector<double>& historico, Rectangle area) {
 namespace Bonus {
 constexpr size_t quantidadeCidades = 100;
 constexpr size_t limiteGeracoes = 10000;
-constexpr size_t limiteSemMelhora = 1000;
 constexpr size_t intervaloRegistros = 500;
 constexpr int geracoesPorQuadro = 10;
 constexpr unsigned int seed = 42;
@@ -77,7 +75,8 @@ struct Registro {
 struct Teste {
     bool ativo = false;
     bool encerrado = false;
-    bool estagnou = false;
+    bool atingiuOtimo = false;
+    double distanciaOtima = 0.0;
     double segundosAG = 0;
     double segundosUltimaMelhoria = 0;
     double referenciaMelhoria = 0;
@@ -85,9 +84,16 @@ struct Teste {
     int selecionado = -1;
     std::vector<Registro> registros;
 
-    void reiniciar(const Individuo& inicial) {
-        encerrado = false;
-        estagnou = false;
+    bool alcancouOtimo(const Individuo& individuo) const {
+        return distanciaOtima > 0.0
+            && std::abs(individuo.distanciaTotal - distanciaOtima)
+                <= std::max(1.0, distanciaOtima) * 1e-9;
+    }
+
+    void reiniciar(const Individuo& inicial, double otimo = 0.0) {
+        distanciaOtima = otimo;
+        atingiuOtimo = alcancouOtimo(inicial);
+        encerrado = ativo && atingiuOtimo;
         segundosAG = segundosUltimaMelhoria = 0;
         ultimaMelhoria = 0;
         referenciaMelhoria = inicial.distanciaTotal;
@@ -109,8 +115,8 @@ struct Teste {
             ultimaMelhoria = geracao;
             segundosUltimaMelhoria = segundosAG;
         }
-        estagnou = geracao - ultimaMelhoria >= limiteSemMelhora;
-        encerrado = estagnou || geracao >= limiteGeracoes;
+        atingiuOtimo = alcancouOtimo(melhor);
+        encerrado = atingiuOtimo || geracao >= limiteGeracoes;
         if (geracao == 100 || geracao % intervaloRegistros == 0 || encerrado)
             registrar(geracao, melhor);
     }
@@ -131,7 +137,7 @@ double otimoCircular(const std::vector<Ponto>& cidades) {
     return soma;
 }
 
-} 
+}
 
 int main() {
     const int larguraJanela = 1200;
@@ -174,8 +180,8 @@ int main() {
         geracaoAtual = 0;
         evoluindo = false;
         historico.assign(1, distanciaInicial);
-        bonus.reiniciar(melhorGlobal);
         distanciaOtima = bonus.ativo ? Bonus::otimoCircular(cidades) : 0;
+        bonus.reiniciar(melhorGlobal, distanciaOtima);
     };
     reiniciarSimulacao();
 
@@ -256,7 +262,7 @@ int main() {
         const Color corStatus = concluido ? UI::azul
             : (evoluindo ? UI::destaque : UI::amarelo);
         const char* status = concluido
-            ? (bonus.ativo ? (bonus.estagnou ? "ESTAGNADO" : "LIMITE ATINGIDO") : "CONCLUIDO")
+            ? (bonus.ativo ? (bonus.atingiuOtimo ? "OTIMO ATINGIDO" : "LIMITE ATINGIDO") : "CONCLUIDO")
             : (evoluindo ? "EM EVOLUCAO" : "PAUSADO");
         const Bonus::Registro* registro = bonus.ativo && bonus.selecionado >= 0
             ? &bonus.registros[size_t(bonus.selecionado)] : nullptr;
@@ -337,10 +343,15 @@ int main() {
         }
         EndScissorMode();
         if (bonus.ativo) {
-            DrawText(TextFormat("Tempo AG: %.3f s | Ultima melhoria: g%d (%.3f s)",
-                     bonus.segundosAG, int(bonus.ultimaMelhoria), bonus.segundosUltimaMelhoria),
+            const size_t epocaExibida = registro ? registro->geracao : geracaoAtual;
+            const double tempoExibido = registro ? registro->segundosAG : bonus.segundosAG;
+            const size_t ultimaMelhoria = registro ? registro->ultimaMelhoria : bonus.ultimaMelhoria;
+            const double tempoUltimaMelhoria = registro
+                ? registro->segundosUltimaMelhoria : bonus.segundosUltimaMelhoria;
+            DrawText(TextFormat("Ate a epoca %d: %.4f s | Ultima melhoria: g%d (%.4f s)",
+                     int(epocaExibida), tempoExibido, int(ultimaMelhoria), tempoUltimaMelhoria),
                      46, 646, 14, UI::texto);
-            DrawText("Parada: 1000 geracoes sem melhora ou limite de 10000. R reinicia.",
+            DrawText("Parada: otimo atingido ou limite de 10000 geracoes. R reinicia.",
                      46, 672, 12, UI::secundario);
         } else {
             DrawCircle(49, 670, 4, UI::destaque);
@@ -352,8 +363,7 @@ int main() {
 
         UI::cartao({850, 100, 326, 112});
         DrawText(bonus.ativo
-            ? TextFormat("SEM MELHORA: %d / %d", int(geracaoAtual - bonus.ultimaMelhoria),
-                         int(Bonus::limiteSemMelhora))
+            ? TextFormat("SEM MELHORA: %d geracoes", int(geracaoAtual - bonus.ultimaMelhoria))
             : "SIMULACAO", 870, 118, 12, UI::secundario);
         DrawText(TextFormat("Geracao %d", int(geracaoAtual)), 870, 142, 22, UI::texto);
         DrawText(TextFormat("/ %d", int(paramsAG.numGeracoes)), 1050, 148, 14, UI::secundario);
@@ -402,4 +412,3 @@ int main() {
     CloseWindow();
     return 0;
 }
-
