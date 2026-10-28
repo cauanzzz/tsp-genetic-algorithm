@@ -333,4 +333,3 @@ O executável `main.exe` é gerado pelo build e está configurado para ser ignor
 
 ---
 
-**Autor:** [Cauan Braga](https://github.com/cauanzzz)
